@@ -20,6 +20,7 @@ import { Event } from 'vs/base/common/event';
 import { AnchorAlignment } from 'vs/base/browser/ui/contextview/contextview';
 import { isLinux, isMacintosh } from 'vs/base/common/platform';
 import { stripCodicons } from 'vs/base/common/codicons';
+import { menuSelection, menuSubmenu } from 'vs/base/browser/ui/codiconLabel/codicons';
 
 export const MENU_MNEMONIC_REGEX = /\(&([^\s&])\)|(^|[^&])&([^\s&])/;
 export const MENU_ESCAPED_MNEMONIC_REGEX = /(&amp;)?(&amp;)([^\s&])/g;
@@ -423,7 +424,7 @@ class BaseMenuActionViewItem extends BaseActionViewItem {
 			}
 		}
 
-		this.check = append(this.item, $('span.menu-item-check.codicon.codicon-check'));
+		this.check = append(this.item, $(menuSelection.cssSelector));
 		this.check.setAttribute('role', 'none');
 
 		this.label = append(this.item, $('span.action-label'));
@@ -670,7 +671,7 @@ class SubmenuMenuActionViewItem extends BaseMenuActionViewItem {
 			addClass(this.item, 'monaco-submenu-item');
 			this.item.setAttribute('aria-haspopup', 'true');
 			this.updateAriaExpanded('false');
-			this.submenuIndicator = append(this.item, $('span.submenu-indicator.codicon.codicon-chevron-right'));
+			this.submenuIndicator = append(this.item, $('span.submenu-indicator' + menuSubmenu.cssSelector));
 			this.submenuIndicator.setAttribute('aria-hidden', 'true');
 		}
 

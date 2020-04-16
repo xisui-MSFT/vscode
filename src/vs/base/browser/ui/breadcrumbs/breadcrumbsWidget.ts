@@ -11,6 +11,7 @@ import { Color } from 'vs/base/common/color';
 import { Emitter, Event } from 'vs/base/common/event';
 import { dispose, IDisposable, DisposableStore } from 'vs/base/common/lifecycle';
 import { ScrollbarVisibility } from 'vs/base/common/scrollable';
+import { breadcrumbSeparator } from 'vs/base/browser/ui/codiconLabel/codicons';
 import 'vs/css!./breadcrumbsWidget';
 
 export abstract class BreadcrumbsItem {
@@ -336,7 +337,7 @@ export class BreadcrumbsWidget {
 		container.tabIndex = -1;
 		container.setAttribute('role', 'listitem');
 		dom.addClasses(container, 'monaco-breadcrumb-item');
-		const iconContainer = dom.$('.codicon.codicon-chevron-right');
+		const iconContainer = dom.$(breadcrumbSeparator.cssSelector);
 		container.appendChild(iconContainer);
 	}
 

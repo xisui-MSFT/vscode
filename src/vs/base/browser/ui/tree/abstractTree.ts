@@ -26,6 +26,7 @@ import { values } from 'vs/base/common/map';
 import { clamp } from 'vs/base/common/numbers';
 import { ScrollEvent } from 'vs/base/common/scrollable';
 import { SetMap } from 'vs/base/common/collections';
+import { listClose } from 'vs/base/browser/ui/codiconLabel/codicons';
 
 class TreeElementsDragAndDropData<T, TFilterData, TContext> extends ElementsDragAndDropData<T, TContext> {
 
@@ -650,7 +651,7 @@ class TypeFilterController<T, TFilterData> implements IDisposable {
 		this.updateFilterOnTypeTitle();
 		domEvent(this.filterOnTypeDomNode, 'input')(this.onDidChangeFilterOnType, this, this.disposables);
 
-		this.clearDomNode = append(controls, $<HTMLInputElement>('button.clear.codicon.codicon-close'));
+		this.clearDomNode = append(controls, $<HTMLInputElement>('button.clear' + listClose.cssSelector));
 		this.clearDomNode.tabIndex = -1;
 		this.clearDomNode.title = localize('clear', "Clear");
 

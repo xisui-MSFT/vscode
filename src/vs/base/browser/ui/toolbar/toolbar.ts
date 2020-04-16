@@ -12,6 +12,7 @@ import { ResolvedKeybinding } from 'vs/base/common/keyCodes';
 import { Disposable, MutableDisposable } from 'vs/base/common/lifecycle';
 import { AnchorAlignment } from 'vs/base/browser/ui/contextview/contextview';
 import { withNullAsUndefined } from 'vs/base/common/types';
+import { toolBarMore } from 'vs/base/browser/ui/codiconLabel/codicons';
 
 export const CONTEXT = 'context.toolbar';
 
@@ -65,7 +66,7 @@ export class ToolBar extends Disposable {
 						this.options.actionViewItemProvider,
 						this.actionRunner,
 						this.options.getKeyBinding,
-						'codicon-more',
+						toolBarMore.className,
 						this.options.anchorAlignmentProvider
 					);
 					this.toggleMenuActionViewItem.value.setActionContext(this.actionBar.context);
