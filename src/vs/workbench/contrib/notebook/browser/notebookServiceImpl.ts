@@ -28,7 +28,7 @@ import { IEditorInput } from 'vs/workbench/common/editor';
 import { DiffEditorInput } from 'vs/workbench/common/editor/diffEditorInput';
 import { Memento } from 'vs/workbench/common/memento';
 import { INotebookEditorContribution, notebooksExtensionPoint, notebookRendererExtensionPoint } from 'vs/workbench/contrib/notebook/browser/extensionPoint';
-import { NotebookEditorOptions } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
+import { INotebookEditorOptions } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
 import { NotebookDiffEditorInput } from 'vs/workbench/contrib/notebook/browser/notebookDiffEditorInput';
 import { NotebookCellTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookCellTextModel';
 import { NotebookTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookTextModel';
@@ -94,9 +94,20 @@ export class NotebookProviderInfoStore extends Disposable {
 
 		for (const extension of extensions) {
 			for (const notebookContribution of extension.value) {
+
+				if (!notebookContribution.type) {
+					extension.collector.error(`Notebook does not specify type-property`);
+					continue;
+				}
+
+				if (this.get(notebookContribution.type)) {
+					extension.collector.error(`Notebook type '${notebookContribution.type}' already used`);
+					continue;
+				}
+
 				this.add(new NotebookProviderInfo({
 					extension: extension.description.identifier,
-					id: notebookContribution.viewType,
+					id: notebookContribution.type,
 					displayName: notebookContribution.displayName,
 					selectors: notebookContribution.selector || [],
 					priority: this._convertPriority(notebookContribution.priority),
@@ -148,10 +159,10 @@ export class NotebookProviderInfoStore extends Disposable {
 
 				if (data) {
 					notebookUri = data.notebook;
-					cellOptions = { resource: resource, options: options };
+					cellOptions = { resource, options };
 				}
 
-				const notebookOptions = new NotebookEditorOptions({ ...options, cellOptions });
+				const notebookOptions: INotebookEditorOptions = { ...options, cellOptions };
 				return { editor: NotebookEditorInput.create(this._instantiationService, notebookUri, notebookProviderInfo.id), options: notebookOptions };
 			};
 			const notebookEditorDiffFactory: DiffEditorInputFactoryFunction = (diffEditorInput: DiffEditorInput, options, group) => {
@@ -349,17 +360,17 @@ export class NotebookService extends Disposable implements INotebookService {
 			for (const extension of renderers) {
 				for (const notebookContribution of extension.value) {
 					if (!notebookContribution.entrypoint) { // avoid crashing
-						console.error(`Cannot register renderer for ${extension.description.identifier.value} since it did not have an entrypoint. This is now required: https://github.com/microsoft/vscode/issues/102644`);
+						extension.collector.error(`Notebook renderer does not specify entry point`);
 						continue;
 					}
 
-					const id = notebookContribution.id ?? notebookContribution.viewType;
+					const id = notebookContribution.id;
 					if (!id) {
-						console.error(`Notebook renderer from ${extension.description.identifier.value} is missing an 'id'`);
+						extension.collector.error(`Notebook renderer does not specify id-property`);
 						continue;
 					}
 
-					this._notebookRenderersInfoStore.add(this._instantiationService.createInstance(NotebookOutputRendererInfo, {
+					this._notebookRenderersInfoStore.add(new NotebookOutputRendererInfo({
 						id,
 						extension: extension.description,
 						entrypoint: notebookContribution.entrypoint,

@@ -3175,9 +3175,18 @@ export interface ISuggestOptions {
 	 */
 	showStatusBar?: boolean;
 	/**
-	 * Enable or disable the rendering of the suggestion inline.
+	 * Enable or disable the rendering of the suggestion preview.
 	 */
 	showSuggestionPreview?: boolean;
+	/**
+	 * Enable or disable the rendering of automatic inline completions.
+	*/
+	showInlineCompletions?: boolean;
+	/**
+	 * Enable or disable the default expansion of the ghost text as used
+	 * by the suggestion preview or the inline completions.
+	 */
+	ghostTextExpanded?: boolean;
 	/**
 	 * Show details inline with the label. Defaults to true.
 	 */
@@ -3310,6 +3319,8 @@ class EditorSuggest extends BaseEditorOption<EditorOption.suggest, InternalSugge
 			showIcons: true,
 			showStatusBar: false,
 			showSuggestionPreview: false,
+			ghostTextExpanded: true,
+			showInlineCompletions: false,
 			showInlineDetails: true,
 			showMethods: true,
 			showFunctions: true,
@@ -3388,7 +3399,16 @@ class EditorSuggest extends BaseEditorOption<EditorOption.suggest, InternalSugge
 					default: defaults.showSuggestionPreview,
 					description: nls.localize('suggest.showSuggestionPreview', "Controls whether to preview the suggestion outcome in the editor.")
 				},
-
+				'editor.suggest.showInlineCompletions': {
+					type: 'boolean',
+					default: defaults.showInlineCompletions,
+					description: nls.localize('suggest.showInlineCompletions', "Controls whether to show inline completions in the editor.")
+				},
+				'editor.suggest.ghostTextExpanded': {
+					type: 'boolean',
+					default: defaults.ghostTextExpanded,
+					description: nls.localize('suggest.ghostTextExpanded', "Controls whether the ghost text that is used by the suggestion preview or the inline completions is expanted by default.")
+				},
 				'editor.suggest.showInlineDetails': {
 					type: 'boolean',
 					default: defaults.showInlineDetails,
@@ -3565,6 +3585,8 @@ class EditorSuggest extends BaseEditorOption<EditorOption.suggest, InternalSugge
 			showIcons: boolean(input.showIcons, this.defaultValue.showIcons),
 			showStatusBar: boolean(input.showStatusBar, this.defaultValue.showStatusBar),
 			showSuggestionPreview: boolean(input.showSuggestionPreview, this.defaultValue.showSuggestionPreview),
+			ghostTextExpanded: boolean(input.ghostTextExpanded, this.defaultValue.ghostTextExpanded),
+			showInlineCompletions: boolean(input.showInlineCompletions, this.defaultValue.showInlineCompletions),
 			showInlineDetails: boolean(input.showInlineDetails, this.defaultValue.showInlineDetails),
 			showMethods: boolean(input.showMethods, this.defaultValue.showMethods),
 			showFunctions: boolean(input.showFunctions, this.defaultValue.showFunctions),

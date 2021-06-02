@@ -18,7 +18,7 @@ import { IContextKey, IContextKeyService } from 'vs/platform/contextkey/common/c
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 import { ILogService } from 'vs/platform/log/common/log';
-import { INotificationService, IPromptChoice, Severity } from 'vs/platform/notification/common/notification';
+import { INotificationService, IPromptChoice, NeverShowAgainScope, Severity } from 'vs/platform/notification/common/notification';
 import { IStorageService, StorageScope, StorageTarget } from 'vs/platform/storage/common/storage';
 import { activeContrastBorder, scrollbarSliderActiveBackground, scrollbarSliderBackground, scrollbarSliderHoverBackground } from 'vs/platform/theme/common/colorRegistry';
 import { ICssStyleCollector, IColorTheme, IThemeService, registerThemingParticipant } from 'vs/platform/theme/common/themeService';
@@ -46,24 +46,27 @@ import { TypeAheadAddon } from 'vs/workbench/contrib/terminal/browser/terminalTy
 import { BrowserFeatures } from 'vs/base/browser/canIUse';
 import { IPreferencesService } from 'vs/workbench/services/preferences/common/preferences';
 import { IEnvironmentVariableInfo } from 'vs/workbench/contrib/terminal/common/environmentVariable';
-import { IProcessDataEvent, IShellLaunchConfig, ITerminalDimensionsOverride, ITerminalLaunchError, TerminalShellType, TerminalSettingId, TitleEventSource, TerminalIcon } from 'vs/platform/terminal/common/terminal';
+import { IProcessDataEvent, IShellLaunchConfig, ITerminalDimensionsOverride, ITerminalLaunchError, TerminalShellType, TerminalSettingId, TitleEventSource, TerminalIcon, TerminalSettingPrefix } from 'vs/platform/terminal/common/terminal';
 import { IProductService } from 'vs/platform/product/common/productService';
 import { formatMessageForTerminal } from 'vs/workbench/contrib/terminal/common/terminalStrings';
 import { AutoOpenBarrier } from 'vs/base/common/async';
 import { Codicon, iconRegistry } from 'vs/base/common/codicons';
 import { ITerminalStatusList, TerminalStatus, TerminalStatusList } from 'vs/workbench/contrib/terminal/browser/terminalStatusList';
-import { IQuickInputService, IQuickPickItem } from 'vs/platform/quickinput/common/quickInput';
+import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from 'vs/platform/quickinput/common/quickInput';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 import { isMacintosh, isWindows, OperatingSystem, OS } from 'vs/base/common/platform';
 import { URI } from 'vs/base/common/uri';
 import { Schemas } from 'vs/base/common/network';
 import { DataTransfers } from 'vs/base/browser/dnd';
 import { DragAndDropObserver, IDragAndDropObserverCallbacks } from 'vs/workbench/browser/dnd';
+import { getColorClass } from 'vs/workbench/contrib/terminal/browser/terminalIcon';
 
 // How long in milliseconds should an average frame take to render for a notification to appear
 // which suggests the fallback DOM-based renderer
 const SLOW_CANVAS_RENDER_THRESHOLD = 50;
 const NUMBER_OF_FRAMES_TO_MEASURE = 20;
+
+const SHOULD_PROMPT_FOR_PROFILE_MIGRATION_KEY = 'terminals.integrated.profile-migration';
 
 const enum Constants {
 	/**
@@ -139,6 +142,8 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	private _lastLayoutDimensions: dom.Dimension | undefined;
 
 	private _hasHadInput: boolean;
+
+	messageShown: boolean = false;
 
 	readonly statusList: ITerminalStatusList = new TerminalStatusList();
 	disableLayout: boolean = false;
@@ -279,7 +284,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		this._initDimensions();
 		this._createProcessManager();
 
-
 		this._register(toDisposable(() => this._dndObserver?.dispose()));
 
 		this._containerReadyBarrier = new AutoOpenBarrier(Constants.WaitForContainerThreshold);
@@ -325,6 +329,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 				window.clearTimeout(initialDataEventsTimeout);
 			}
 		}));
+		this.showProfileMigrationNotification();
 	}
 
 	private _getIcon(): TerminalIcon | undefined {
@@ -350,6 +355,45 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 
 	addDisposable(disposable: IDisposable): void {
 		this._register(disposable);
+	}
+
+	async showProfileMigrationNotification(): Promise<void> {
+		const platform = this._getPlatformKey();
+		const shouldMigrateToProfile = (!!this._configurationService.getValue(TerminalSettingPrefix.Shell + platform) ||
+			!!this._configurationService.inspect(TerminalSettingPrefix.ShellArgs + platform).userValue) &&
+			!!this._configurationService.getValue(TerminalSettingPrefix.DefaultProfile + platform);
+		if (shouldMigrateToProfile && this._storageService.getBoolean(SHOULD_PROMPT_FOR_PROFILE_MIGRATION_KEY, StorageScope.WORKSPACE, true) && !this.messageShown) {
+			this._notificationService.prompt(
+				Severity.Info,
+				nls.localize('terminalProfileMigration', "The terminal is using deprecated shell/shellArgs settings, do you want to migrate it to a profile?"),
+				[
+					{
+						label: nls.localize('migrateToProfile', "Migrate"),
+						run: async () => {
+							const shell = this._configurationService.getValue(TerminalSettingPrefix.Shell + platform);
+							const shellArgs = this._configurationService.getValue(TerminalSettingPrefix.ShellArgs + platform);
+							const profile = await this._terminalProfileResolverService.createProfileFromShellAndShellArgs(shell, shellArgs);
+							if (profile) {
+								this._configurationService.updateValue(TerminalSettingPrefix.DefaultProfile + platform, profile.profileName);
+								this._configurationService.updateValue(TerminalSettingPrefix.Shell + platform, undefined);
+								this._configurationService.updateValue(TerminalSettingPrefix.ShellArgs + platform, undefined);
+								this._logService.trace(`migrated from shell/shellArgs, ${shell} ${shellArgs} to profile ${JSON.stringify(profile)}`);
+							} else {
+								this._logService.trace('migration from shell/shellArgs to profile did not occur bc created profile was an exact match for existing one', shell, shellArgs);
+							}
+						}
+					} as IPromptChoice,
+				],
+				{
+					neverShowAgain: { id: SHOULD_PROMPT_FOR_PROFILE_MIGRATION_KEY, scope: NeverShowAgainScope.WORKSPACE }
+				}
+			);
+			this.messageShown = true;
+		}
+	}
+
+	private _getPlatformKey(): string {
+		return isWindows ? 'windows' : (isMacintosh ? 'osx' : 'linux');
 	}
 
 	private _initDimensions(): void {
@@ -593,7 +637,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 			return;
 		}
 
-		// Attach has not occured yet
+		// Attach has not occurred yet
 		if (!this._wrapperElement) {
 			return this._attachToElement(container);
 		}
@@ -774,7 +818,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 
 	private _initDragAndDrop(container: HTMLElement) {
 		this._dndObserver?.dispose();
-		const dndController = new TerminalInstanceDropAndDropController(container);
+		const dndController = new TerminalInstanceDragAndDropController(container);
 		dndController.onDropTerminal(e => this._onRequestAddInstanceToGroup.fire(e));
 		dndController.onDropFile(async path => {
 			const preparedPath = await this._terminalInstanceService.preparePathForTerminalAsync(path, this.shellLaunchConfig.executable, this.title, this.shellType, this.isRemote);
@@ -1788,13 +1832,15 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		return this._linkManager.registerExternalLinkProvider(this, provider);
 	}
 
-	async rename() {
-		const name = await this._quickInputService.input({
-			value: this.title,
-			prompt: nls.localize('workbench.action.terminal.rename.prompt', "Enter terminal name"),
-		});
-		if (name) {
-			this.setTitle(name, TitleEventSource.Api);
+	async rename(title?: string) {
+		if (!title) {
+			title = await this._quickInputService.input({
+				value: this.title,
+				prompt: nls.localize('workbench.action.terminal.rename.prompt', "Enter terminal name"),
+			});
+		}
+		if (title) {
+			this.setTitle(title, TitleEventSource.Api);
 		}
 	}
 
@@ -1804,7 +1850,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 			items.push({ label: `$(${icon.id})`, description: `${icon.id}` });
 		}
 		const result = await this._quickInputService.pick(items, {
-			title: nls.localize('changeTerminalIcon', "Change Icon"),
 			matchOnDescription: true
 		});
 		if (result && result.description) {
@@ -1818,27 +1863,58 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		if (!icon) {
 			return;
 		}
-		const items: IQuickPickItem[] = [];
-		for (const color of colors) {
-			items.push({
-				label: `$(${Codicon.circleFilled.id}) ${color.replace('terminal.ansi', '')}`, id: `${color.replace(/\./g, '_')}`, description: `${color}`, iconClasses: [`terminal-icon-${color.replace(/\./g, '_')}`]
-			});
+
+		const standardColors: string[] = [];
+		const colorTheme = this._themeService.getColorTheme();
+		for (const colorKey in ansiColorMap) {
+			const color = colorTheme.getColor(colorKey);
+			if (color && !colorKey.toLowerCase().includes('bright')) {
+				standardColors.push(colorKey);
+			}
 		}
 
-		const result = await this._quickInputService.pick(items, {
-			title: nls.localize('changeTerminalColor', "Change Color"),
-			matchOnDescription: true
+		const styleElement = document.createElement('style');
+		let css = '';
+		const items: (IQuickPickItem | IQuickPickSeparator)[] = [];
+		for (const colorKey of standardColors) {
+			const colorClass = getColorClass(colorKey);
+			items.push({
+				label: `$(${Codicon.circleFilled.id}) ${colorKey.replace('terminal.ansi', '')}`, id: colorKey, description: colorKey, iconClasses: [colorClass]
+			});
+			const color = colorTheme.getColor(colorKey);
+			if (color) {
+				css += `.monaco-workbench .${colorClass} .codicon:first-child:not(.codicon-split-horizontal):not(.codicon-trashcan):not(.file-icon) { color: ${color} !important; }`;
+			}
+		}
+		items.push({ type: 'separator' });
+		const showAllColorsItem = { label: 'Reset to default' };
+		items.push(showAllColorsItem);
+		styleElement.textContent = css;
+		document.body.appendChild(styleElement);
+
+		const quickPick = this._quickInputService.createQuickPick();
+		quickPick.items = items;
+		quickPick.matchOnDescription = true;
+		quickPick.show();
+		const disposables: IDisposable[] = [];
+		const result = await new Promise<IQuickPickItem | undefined>(r => {
+			disposables.push(quickPick.onDidHide(() => r(undefined)));
+			disposables.push(quickPick.onDidAccept(() => r(quickPick.selectedItems[0])));
 		});
+		dispose(disposables);
+
 		if (result) {
 			this.shellLaunchConfig.color = result.id;
 			this._onIconChanged.fire(this);
 		}
+
+		quickPick.hide();
+		document.body.removeChild(styleElement);
 	}
 }
 
-class TerminalInstanceDropAndDropController extends Disposable implements IDragAndDropObserverCallbacks {
+class TerminalInstanceDragAndDropController extends Disposable implements IDragAndDropObserverCallbacks {
 	private _dropOverlay?: HTMLElement;
-
 
 	private readonly _onDropFile = new Emitter<string>();
 	get onDropFile(): Event<string> { return this._onDropFile.event; }
@@ -1946,19 +2022,7 @@ class TerminalInstanceDropAndDropController extends Disposable implements IDragA
 	}
 }
 
-let colors: string[] = [];
 registerThemingParticipant((theme: IColorTheme, collector: ICssStyleCollector) => {
-	// add icon colors
-	colors = [];
-	for (const colorKey in ansiColorMap) {
-		const color = theme.getColor(colorKey);
-		if (color && !colorKey.toLowerCase().includes('bright')) {
-			colors.push(colorKey);
-			// exclude status icons (file-icon) and inline action icons (trashcan and horizontalSplit)
-			collector.addRule(`.monaco-workbench .terminal-icon-${colorKey.replace(/\./g, '_')} .codicon:not(.codicon-split-horizontal):not(.codicon-trashcan):not(.file-icon) { color: ${color} !important; }`);
-		}
-	}
-
 	// Border
 	const border = theme.getColor(activeContrastBorder);
 	if (border) {

@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as nls from 'vs/nls';
-import { EditorModel, IEditorInput, IRevertOptions, ISaveOptions } from 'vs/workbench/common/editor';
+import { IEditorInput, IRevertOptions, ISaveOptions } from 'vs/workbench/common/editor';
+import { EditorModel } from 'vs/workbench/common/editor/editorModel';
 import { Emitter, Event } from 'vs/base/common/event';
 import { ICellDto2, INotebookEditorModel, INotebookLoadOptions, IResolvedNotebookEditorModel, NotebookCellsChangeType, NotebookDataDto, NotebookDocumentBackupData } from 'vs/workbench/contrib/notebook/common/notebookCommon';
 import { NotebookTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookTextModel';
@@ -23,7 +24,7 @@ import { TaskSequentializer } from 'vs/base/common/async';
 import { bufferToStream, streamToBuffer, VSBuffer, VSBufferReadableStream } from 'vs/base/common/buffer';
 import { assertType } from 'vs/base/common/types';
 import { IUntitledTextEditorService } from 'vs/workbench/services/untitled/common/untitledTextEditorService';
-import { StoredFileWorkingCopy, StoredFileWorkingCopyState, IStoredFileWorkingCopy, IStoredFileWorkingCopyModel, IStoredFileWorkingCopyModelContentChangedEvent, IStoredFileWorkingCopyModelFactory } from 'vs/workbench/services/workingCopy/common/storedFileWorkingCopy';
+import { StoredFileWorkingCopyState, IStoredFileWorkingCopy, IStoredFileWorkingCopyModel, IStoredFileWorkingCopyModelContentChangedEvent, IStoredFileWorkingCopyModelFactory } from 'vs/workbench/services/workingCopy/common/storedFileWorkingCopy';
 import { DisposableStore, IDisposable } from 'vs/base/common/lifecycle';
 import { canceled } from 'vs/base/common/errors';
 import { NotebookEditorInput } from 'vs/workbench/contrib/notebook/common/notebookEditorInput';
@@ -130,6 +131,10 @@ export class ComplexNotebookEditorModel extends EditorModel implements INotebook
 	}
 
 	isOrphaned(): boolean {
+		return false;
+	}
+
+	hasAssociatedFilePath(): boolean {
 		return false;
 	}
 
@@ -465,6 +470,10 @@ export class SimpleNotebookEditorModel extends EditorModel implements INotebookE
 		return SimpleNotebookEditorModel._isStoredFileWorkingCopy(this._workingCopy) && this._workingCopy.hasState(StoredFileWorkingCopyState.ORPHAN);
 	}
 
+	hasAssociatedFilePath(): boolean {
+		return !SimpleNotebookEditorModel._isStoredFileWorkingCopy(this._workingCopy) && !!this._workingCopy?.hasAssociatedFilePath;
+	}
+
 	isReadonly(): boolean {
 		if (SimpleNotebookEditorModel._isStoredFileWorkingCopy(this._workingCopy)) {
 			return this._workingCopy.isReadonly();
@@ -518,8 +527,10 @@ export class SimpleNotebookEditorModel extends EditorModel implements INotebookE
 		return this._instantiationService.createInstance(NotebookEditorInput, newWorkingCopy.resource, this.viewType, {});
 	}
 
-	private static _isStoredFileWorkingCopy(candidate?: unknown): candidate is IStoredFileWorkingCopy<NotebookFileWorkingCopyModel> {
-		return candidate instanceof StoredFileWorkingCopy;
+	private static _isStoredFileWorkingCopy(candidate?: IStoredFileWorkingCopy<NotebookFileWorkingCopyModel> | IUntitledFileWorkingCopy<NotebookFileWorkingCopyModel>): candidate is IStoredFileWorkingCopy<NotebookFileWorkingCopyModel> {
+		const isUntitled = candidate && candidate.capabilities & WorkingCopyCapabilities.Untitled;
+
+		return !isUntitled;
 	}
 }
 

@@ -131,7 +131,17 @@ export const enum NotebookRendererMatch {
 	Never = 3,
 }
 
-export type RendererMessagingSpec = true | false | 'optional';
+/**
+ * Renderer messaging requirement. While this allows for 'optional' messaging,
+ * VS Code effectively treats it the same as true right now. "Partial
+ * activation" of extensions is a very tricky problem, which could allow
+ * solving this. But for now, optional is mostly only honored for aznb.
+ */
+export const enum RendererMessagingSpec {
+	Always = 'always',
+	Never = 'never',
+	Optional = 'optional',
+}
 
 export interface INotebookRendererInfo {
 	id: string;
@@ -167,20 +177,18 @@ export interface IOrderedMimeType {
 
 export interface IOutputItemDto {
 	readonly mime: string;
-	readonly value: unknown;
-	readonly valueBytes?: number[];
-	readonly metadata?: Record<string, unknown>;
+	readonly valueBytes: number[];
 }
 
 export interface IOutputDto {
 	outputs: IOutputItemDto[];
 	outputId: string;
-	metadata?: Record<string, unknown>;
+	metadata?: Record<string, any>;
 }
 
 export interface ICellOutput {
 	outputs: IOutputItemDto[];
-	// metadata?: NotebookCellOutsputMetadata;
+	metadata?: Record<string, any>;
 	outputId: string;
 	onDidChangeData: Event<void>;
 	replaceData(items: IOutputItemDto[]): void;
@@ -189,6 +197,7 @@ export interface ICellOutput {
 
 export interface CellInternalMetadataChangedEvent {
 	readonly runStateChanged?: boolean;
+	readonly lastRunSuccessChanged?: boolean;
 }
 
 export interface ICell {
@@ -596,7 +605,6 @@ const _mimeTypeInfo = new Map<string, MimeTypeInfo>([
 	['application/x.notebook.stdout', { alwaysSecure: true, supportedByCore: true, mergeable: true }],
 	['application/x.notebook.stderr', { alwaysSecure: true, supportedByCore: true, mergeable: true }],
 	['application/x.notebook.stream', { alwaysSecure: true, supportedByCore: true, mergeable: true }], // deprecated
-	['application/x.notebook.error-traceback', { alwaysSecure: true, supportedByCore: true }], // deprecated
 ]);
 
 export function mimeTypeIsAlwaysSecure(mimeType: string): boolean {
@@ -739,6 +747,7 @@ export interface INotebookEditorModel extends IEditorModel {
 	isDirty(): boolean;
 	isReadonly(): boolean;
 	isOrphaned(): boolean;
+	hasAssociatedFilePath(): boolean;
 	load(options?: INotebookLoadOptions): Promise<IResolvedNotebookEditorModel>;
 	save(options?: ISaveOptions): Promise<boolean>;
 	saveAs(target: URI): Promise<IEditorInput | undefined>;
@@ -900,19 +909,24 @@ export interface INotebookCellStatusBarItemList {
 }
 
 export const DisplayOrderKey = 'notebook.displayOrder';
-export const CellToolbarLocKey = 'notebook.cellToolbarLocation';
+export const CellToolbarLocation = 'notebook.cellToolbarLocation';
 export const CellToolbarVisibility = 'notebook.cellToolbarVisibility';
 export const ShowCellStatusBarKey = 'notebook.showCellStatusBar';
+export const ShowCellStatusBarAfterExecuteKey = 'notebook.showCellStatusBarAfterExecute';
 export const NotebookTextDiffEditorPreview = 'notebook.diff.enablePreview';
 export const ExperimentalUseMarkdownRenderer = 'notebook.experimental.useMarkdownRenderer';
-export const ExperimentalCompactView = 'notebook.experimental.compactView';
-export const ExperimentalFocusIndicator = 'notebook.experimental.cellFocusIndicator';
-export const ExperimentalInsertToolbarPosition = 'notebook.experimental.insertToolbarPosition';
-export const ExperimentalGlobalToolbar = 'notebook.experimental.globalToolbar';
-export const ExperimentalUndoRedoPerCell = 'notebook.experimental.undoRedoPerCell';
-export const ExperimentalConsolidatedOutputButton = 'notebook.experimental.consolidatedOutputButton';
-export const ExperimentalShowFoldingControls = 'notebook.experimental.showFoldingControls';
-export const ExperimentalDragAndDropEnabled = 'notebook.experimental.dragAndDropEnabled';
+export const ExperimentalInsertToolbarAlignment = 'notebook.experimental.insertToolbarAlignment';
+export const CompactView = 'notebook.compactView';
+export const FocusIndicator = 'notebook.cellFocusIndicator';
+export const InsertToolbarPosition = 'notebook.insertToolbarPosition';
+export const GlobalToolbar = 'notebook.globalToolbar';
+export const UndoRedoPerCell = 'notebook.undoRedoPerCell';
+export const ConsolidatedOutputButton = 'notebook.consolidatedOutputButton';
+export const ShowFoldingControls = 'notebook.showFoldingControls';
+export const DragAndDropEnabled = 'notebook.dragAndDropEnabled';
+export const NotebookCellEditorOptionsCustomizations = 'notebook.editorOptionsCustomizations';
+export const ConsolidatedRunButton = 'notebook.consolidatedRunButton';
+export const OpenGettingStarted = 'notebook.experimental.openGettingStarted';
 
 export const enum CellStatusbarAlignment {
 	Left = 1,

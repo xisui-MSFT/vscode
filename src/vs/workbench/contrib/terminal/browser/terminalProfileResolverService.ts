@@ -77,7 +77,10 @@ export abstract class BaseTerminalProfileResolverService implements ITerminalPro
 			shellLaunchConfig.icon = this._getCustomIcon(shellLaunchConfig.icon) || Codicon.terminal;
 			return;
 		}
-
+		if (shellLaunchConfig.customPtyImplementation) {
+			shellLaunchConfig.icon = Codicon.terminal;
+			return;
+		}
 		if (shellLaunchConfig.executable) {
 			return;
 		}
@@ -113,10 +116,14 @@ export abstract class BaseTerminalProfileResolverService implements ITerminalPro
 		// Verify the icon is valid, and fallback correctly to the generic terminal id if there is
 		// an issue
 		shellLaunchConfig.icon = this._getCustomIcon(shellLaunchConfig.icon) || this._getCustomIcon(resolvedProfile.icon) || Codicon.terminal;
+
 		// Override the name if specified
 		if (resolvedProfile.overrideName) {
 			shellLaunchConfig.name = resolvedProfile.profileName;
 		}
+
+		// Apply the color
+		shellLaunchConfig.color = resolvedProfile.color;
 
 		// Resolve useShellEnvironment based on the setting if it's not set
 		if (shellLaunchConfig.useShellEnvironment === undefined) {
@@ -201,7 +208,7 @@ export abstract class BaseTerminalProfileResolverService implements ITerminalPro
 	}
 
 	private _getUnresolvedRealDefaultProfile(os: OperatingSystem): ITerminalProfile | undefined {
-		const defaultProfileName = this.getSafeConfigValue('defaultProfile', os);
+		const defaultProfileName = this._configurationService.getValue(`terminal.integrated.defaultProfile.${this._getOsKey(os)}`);
 		if (defaultProfileName && typeof defaultProfileName === 'string') {
 			return this._terminalService.availableProfiles.find(e => e.profileName === defaultProfileName);
 		}
@@ -209,9 +216,13 @@ export abstract class BaseTerminalProfileResolverService implements ITerminalPro
 	}
 
 	private async _getUnresolvedShellSettingDefaultProfile(options: IShellLaunchConfigResolveOptions): Promise<ITerminalProfile | undefined> {
-		let executable = this.getSafeConfigValue('shell', options.os) as string | null;
-		if (!this._isValidShell(executable) && !this.getSafeConfigValue('shellArgs', options.os, false)) {
-			return undefined;
+		let executable = this._configurationService.getValue<string>(`terminal.integrated.shell.${this._getOsKey(options.os)}`);
+		if (!this._isValidShell(executable)) {
+			const shellArgs = this._configurationService.inspect(`terminal.integrated.shellArgs.${this._getOsKey(options.os)}`);
+			//  && !this.getSafeConfigValue('shellArgs', options.os, false)) {
+			if (!shellArgs.userValue && !shellArgs.workspaceValue) {
+				return undefined;
+			}
 		}
 
 		if (!executable || !this._isValidShell(executable)) {
@@ -219,12 +230,12 @@ export abstract class BaseTerminalProfileResolverService implements ITerminalPro
 		}
 
 		let args: string | string[] | undefined;
-		const shellArgsSetting = this.getSafeConfigValue('shellArgs', options.os);
+		const shellArgsSetting = this._configurationService.getValue(`terminal.integrated.shellArgs.${this._getOsKey(options.os)}`);
 		if (this._isValidShellArgs(shellArgsSetting, options.os)) {
 			args = shellArgsSetting;
 		}
 		if (args === undefined) {
-			if (options.os === OperatingSystem.Macintosh && args === undefined && path.parse(executable).name.match(/(zsh|bash)/)) {
+			if (options.os === OperatingSystem.Macintosh && args === undefined && path.parse(executable).name.match(/(zsh|bash|fish)/)) {
 				// macOS should launch a login shell by default
 				args = ['--login'];
 			} else {
@@ -275,7 +286,7 @@ export abstract class BaseTerminalProfileResolverService implements ITerminalPro
 	}
 
 	private _getUnresolvedAutomationShellProfile(options: IShellLaunchConfigResolveOptions): ITerminalProfile | undefined {
-		const automationShell = this.getSafeConfigValue('automationShell', options.os);
+		const automationShell = this._configurationService.getValue(`terminal.integrated.automationShell.${this._getOsKey(options.os)}`);
 		if (!automationShell || typeof automationShell !== 'string') {
 			return undefined;
 		}
@@ -381,30 +392,43 @@ export abstract class BaseTerminalProfileResolverService implements ITerminalPro
 		return false;
 	}
 
-	// TODO: Remove when workspace trust is enabled
-	getSafeConfigValue(key: string, os: OperatingSystem, useDefaultValue: boolean = true): unknown | undefined {
-		return this.getSafeConfigValueFullKey(`terminal.integrated.${key}.${this._getOsKey(os)}`, useDefaultValue);
+	async createProfileFromShellAndShellArgs(shell?: unknown, shellArgs?: unknown): Promise<ITerminalProfile | undefined> {
+		const detectedProfile = this._terminalService.availableProfiles?.find(p => p.path === shell);
+		const fallbackProfile = (await this.getDefaultProfile({
+			remoteAuthority: this._remoteAgentService.getConnection()?.remoteAuthority,
+			os: this._primaryBackendOs!
+		}));
+		const profile = detectedProfile || fallbackProfile;
+		const args = this._isValidShellArgs(shellArgs, this._primaryBackendOs!) ? shellArgs : profile.args;
+		const createdProfile = {
+			profileName: profile.profileName,
+			path: profile.path,
+			args,
+			isDefault: true
+		};
+		if (detectedProfile && detectedProfile.profileName === createdProfile.profileName && detectedProfile.path === createdProfile.path && this._argsMatch(detectedProfile.args, createdProfile.args)) {
+			return undefined;
+		}
+		return createdProfile;
 	}
-	getSafeConfigValueFullKey(key: string, useDefaultValue: boolean = true): unknown | undefined {
-		const isWorkspaceConfigAllowed = this._configurationService.getValue(TerminalSettingId.AllowWorkspaceConfiguration);
-		const config = this._configurationService.inspect(key);
-		let value: unknown | undefined;
-		if (isWorkspaceConfigAllowed) {
-			value = config.user?.value || config.workspace?.value;
-		} else {
-			value = config.user?.value;
+
+	private _argsMatch(args1: string | string[] | undefined, args2: string | string[] | undefined): boolean {
+		if (!args1 && !args2) {
+			return true;
+		} else if (typeof args1 === 'string' && typeof args2 === 'string') {
+			return args1 === args2;
+		} else if (Array.isArray(args1) && Array.isArray(args2)) {
+			if (args1.length !== args2.length) {
+				return false;
+			}
+			for (let i = 0; i < args1.length; i++) {
+				if (args1[i] !== args2[i]) {
+					return false;
+				}
+			}
+			return true;
 		}
-		if (value === undefined && useDefaultValue) {
-			value = config.default?.value;
-		}
-		// Clone if needed to allow extensibility
-		if (Array.isArray(value)) {
-			return value.slice();
-		}
-		if (value !== null && typeof value === 'object') {
-			return { ...value };
-		}
-		return value;
+		return false;
 	}
 }
 

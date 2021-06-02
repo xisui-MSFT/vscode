@@ -9,8 +9,9 @@ import { EventType, addDisposableListener, getClientArea, Dimension, position, s
 import { onDidChangeFullscreen, isFullscreen } from 'vs/base/browser/browser';
 import { IWorkingCopyBackupService } from 'vs/workbench/services/workingCopy/common/workingCopyBackup';
 import { Registry } from 'vs/platform/registry/common/platform';
-import { isWindows, isLinux, isMacintosh, isWeb, isNative } from 'vs/base/common/platform';
-import { pathsToEditors, SideBySideEditorInput } from 'vs/workbench/common/editor';
+import { isWindows, isLinux, isMacintosh, isWeb, isNative, isIOS } from 'vs/base/common/platform';
+import { IResourceDiffEditorInput, pathsToEditors } from 'vs/workbench/common/editor';
+import { SideBySideEditorInput } from 'vs/workbench/common/editor/sideBySideEditorInput';
 import { SidebarPart } from 'vs/workbench/browser/parts/sidebar/sidebarPart';
 import { PanelPart } from 'vs/workbench/browser/parts/panel/panelPart';
 import { PanelRegistry, Extensions as PanelExtensions } from 'vs/workbench/browser/panel';
@@ -600,12 +601,14 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			// Files to diff is exclusive
 			return pathsToEditors(initialFilesToOpen.filesToDiff, fileService).then(filesToDiff => {
 				if (filesToDiff.length === 2) {
-					return [{
-						leftResource: filesToDiff[0].resource,
-						rightResource: filesToDiff[1].resource,
+					const diffEditorInput: IResourceDiffEditorInput[] = [{
+						originalInput: { resource: filesToDiff[0].resource },
+						modifiedInput: { resource: filesToDiff[1].resource },
 						options: { pinned: true },
 						forceFile: true
 					}];
+
+					return diffEditorInput;
 				}
 
 				// Otherwise: Open/Create files
@@ -700,7 +703,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 
 			let openEditorsPromise: Promise<unknown> | undefined = undefined;
 			if (editors.length) {
-				openEditorsPromise = this.editorService.openEditors(editors);
+				openEditorsPromise = this.editorService.openEditors(editors, undefined, { validateTrust: true });
 			}
 
 			// do not block the overall layout ready flow from potentially
@@ -1049,7 +1052,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 				silentNotifications: boolean;
 			} = this.configurationService.getValue('zenMode');
 
-			toggleFullScreen = !this.state.fullscreen && config.fullScreen;
+			toggleFullScreen = !this.state.fullscreen && config.fullScreen && !isIOS;
 
 			this.state.zenMode.transitionedToFullScreen = restoring ? config.fullScreen : toggleFullScreen;
 			this.state.zenMode.transitionedToCenteredEditorLayout = !this.isEditorLayoutCentered() && config.centerLayout;
@@ -1625,7 +1628,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 
 		let newVisibilityValue: string;
 		if (currentVisibilityValue === 'visible' || currentVisibilityValue === 'classic') {
-			newVisibilityValue = 'compact';
+			newVisibilityValue = getTitleBarStyle(this.configurationService) === 'native' ? 'toggle' : 'compact';
 		} else {
 			newVisibilityValue = 'classic';
 		}

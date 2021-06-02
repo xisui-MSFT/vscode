@@ -17,6 +17,7 @@ import type { WebglAddon as XTermWebglAddon } from 'xterm-addon-webgl';
 import { ITerminalStatusList } from 'vs/workbench/contrib/terminal/browser/terminalStatusList';
 import { ICompleteTerminalConfiguration } from 'vs/workbench/contrib/terminal/common/remoteTerminalChannel';
 import { Orientation } from 'vs/base/browser/ui/splitview/splitview';
+import { IEditableData } from 'vs/workbench/common/views';
 
 export const ITerminalService = createDecorator<ITerminalService>('terminalService');
 export const ITerminalInstanceService = createDecorator<ITerminalInstanceService>('terminalInstanceService');
@@ -120,6 +121,7 @@ export interface ITerminalService {
 	onInstancesChanged: Event<void>;
 	onInstanceTitleChanged: Event<ITerminalInstance | undefined>;
 	onInstanceIconChanged: Event<ITerminalInstance | undefined>;
+	onInstanceColorChanged: Event<ITerminalInstance | undefined>;
 	onInstancePrimaryStatusChanged: Event<ITerminalInstance>;
 	onActiveInstanceChanged: Event<ITerminalInstance | undefined>;
 	onDidRegisterProcessSupport: Event<void>;
@@ -138,6 +140,8 @@ export interface ITerminalService {
 	 * @param profile The profile to launch the terminal with.
 	 */
 	createTerminal(profile: ITerminalProfile): ITerminalInstance;
+
+	createContributedTerminalProfile(id: string, isSplitTerminal: boolean): Promise<void>;
 
 	/**
 	 * Creates a raw terminal instance, this should not be used outside of the terminal part.
@@ -197,6 +201,8 @@ export interface ITerminalService {
 	 */
 	registerLinkProvider(linkProvider: ITerminalExternalLinkProvider): IDisposable;
 
+	registerTerminalProfileProvider(id: string, profileProvider: ITerminalProfileProvider): IDisposable;
+
 	showProfileQuickPick(type: 'setDefault' | 'createInstance', cwd?: string | URI): Promise<ITerminalInstance | undefined>;
 
 	getGroupForInstance(instance: ITerminalInstance): ITerminalGroup | undefined;
@@ -205,6 +211,9 @@ export interface ITerminalService {
 
 	requestStartExtensionTerminal(proxy: ITerminalProcessExtHostProxy, cols: number, rows: number): Promise<ITerminalLaunchError | undefined>;
 	isAttachedToTerminal(remoteTerm: IRemoteTerminalAttachTarget): boolean;
+	getEditableData(instance: ITerminalInstance): IEditableData | undefined;
+	setEditable(instance: ITerminalInstance, data: IEditableData | null): Promise<void>;
+	instanceIsSplit(instance: ITerminalInstance): boolean;
 }
 
 export interface IRemoteTerminalService extends IOffProcessTerminalService {
@@ -218,6 +227,10 @@ export interface IRemoteTerminalService extends IOffProcessTerminalService {
  */
 export interface ITerminalExternalLinkProvider {
 	provideLinks(instance: ITerminalInstance, line: string): Promise<ITerminalLink[] | undefined>;
+}
+
+export interface ITerminalProfileProvider {
+	createContributedTerminalProfile(isSplitTerminal: boolean): Promise<void>;
 }
 
 export interface ITerminalLink {
@@ -599,12 +612,13 @@ export interface ITerminalInstance {
 	registerLinkProvider(provider: ITerminalExternalLinkProvider): IDisposable;
 
 	/**
-	 * Triggers a quick pick to rename this terminal.
+	 * Sets the terminal name to the provided title or triggers a quick pick
+	 * to take user input.
 	 */
-	rename(): Promise<void>;
+	rename(title?: string): Promise<void>;
 
 	/**
-	 * Triggers a quick pick to rename this terminal.
+	 * Triggers a quick pick to change the icon of this terminal.
 	 */
 	changeIcon(): Promise<void>;
 

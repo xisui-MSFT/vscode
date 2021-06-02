@@ -4,13 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { coalesce, isNonEmptyArray } from 'vs/base/common/arrays';
-import { VSBuffer } from 'vs/base/common/buffer';
 import * as htmlContent from 'vs/base/common/htmlContent';
 import { DisposableStore } from 'vs/base/common/lifecycle';
 import * as marked from 'vs/base/common/marked/marked';
 import { parse } from 'vs/base/common/marshalling';
 import { cloneAndChange } from 'vs/base/common/objects';
-import { isDefined, isNumber, isString } from 'vs/base/common/types';
+import { isDefined, isEmptyObject, isNumber, isString } from 'vs/base/common/types';
 import { URI, UriComponents } from 'vs/base/common/uri';
 import { RenderLineNumbersType } from 'vs/editor/common/config/editorOptions';
 import { IPosition } from 'vs/editor/common/core/position';
@@ -1416,39 +1415,10 @@ export namespace NotebookRange {
 	}
 }
 
-export namespace NotebookCellMetadata {
-
-	export function to(data: notebooks.NotebookCellMetadata): types.NotebookCellMetadata {
-		return new types.NotebookCellMetadata().with({
-			...data,
-			...{
-				executionOrder: null,
-				lastRunSuccess: null,
-				runState: null,
-				runStartTime: null,
-				runStartTimeAdjustment: null,
-				runEndTime: null
-			}
-		});
-	}
-}
-
-export namespace NotebookDocumentMetadata {
-
-	export function from(data: types.NotebookDocumentMetadata): notebooks.NotebookDocumentMetadata {
-		return data;
-	}
-
-	export function to(data: notebooks.NotebookDocumentMetadata): types.NotebookDocumentMetadata {
-		return new types.NotebookDocumentMetadata().with(data);
-	}
-}
-
 export namespace NotebookCellExecutionSummary {
 	export function to(data: notebooks.NotebookCellInternalMetadata): vscode.NotebookCellExecutionSummary {
 		return {
-			startTime: data.runStartTime,
-			endTime: data.runEndTime,
+			timing: typeof data.runStartTime === 'number' && typeof data.runEndTime === 'number' ? { startTime: data.runStartTime, endTime: data.runEndTime } : undefined,
 			executionOrder: data.executionOrder,
 			success: data.lastRunSuccess
 		};
@@ -1457,8 +1427,8 @@ export namespace NotebookCellExecutionSummary {
 	export function from(data: vscode.NotebookCellExecutionSummary): Partial<notebooks.NotebookCellInternalMetadata> {
 		return {
 			lastRunSuccess: data.success,
-			runStartTime: data.startTime,
-			runEndTime: data.endTime,
+			runStartTime: data.timing?.startTime,
+			runEndTime: data.timing?.endTime,
 			executionOrder: data.executionOrder
 		};
 	}
@@ -1490,7 +1460,7 @@ export namespace NotebookData {
 
 	export function from(data: vscode.NotebookData): notebooks.NotebookDataDto {
 		const res: notebooks.NotebookDataDto = {
-			metadata: NotebookDocumentMetadata.from(data.metadata),
+			metadata: Object.create(null),
 			cells: [],
 		};
 		for (let cell of data.cells) {
@@ -1501,10 +1471,13 @@ export namespace NotebookData {
 	}
 
 	export function to(data: notebooks.NotebookDataDto): vscode.NotebookData {
-		return {
-			metadata: NotebookDocumentMetadata.to(data.metadata),
-			cells: data.cells.map(NotebookCellData.to)
-		};
+		const res = new types.NotebookData(
+			data.cells.map(NotebookCellData.to),
+		);
+		if (!isEmptyObject(data.metadata)) {
+			res.metadata = data.metadata;
+		}
+		return res;
 	}
 }
 
@@ -1527,47 +1500,30 @@ export namespace NotebookCellData {
 			data.source,
 			data.language,
 			data.outputs ? data.outputs.map(NotebookCellOutput.to) : undefined,
-			data.metadata ? NotebookCellMetadata.to(data.metadata) : undefined,
+			data.metadata,
+			data.internalMetadata ? NotebookCellExecutionSummary.to(data.internalMetadata) : undefined
 		);
 	}
 }
 
 export namespace NotebookCellOutputItem {
 	export function from(item: types.NotebookCellOutputItem): notebooks.IOutputItemDto {
-		let value: unknown;
-		let valueBytes: number[] | undefined;
-		if (item.value instanceof Uint8Array) {
-			//todo@jrieken this HACKY and SLOW... hoist VSBuffer instead
-			valueBytes = Array.from(item.value);
-		} else {
-			value = item.value;
-		}
 		return {
-			metadata: item.metadata,
 			mime: item.mime,
-			value,
-			valueBytes,
+			valueBytes: Array.from(item.data), //todo@jrieken this HACKY and SLOW... hoist VSBuffer instead
 		};
 	}
 
 	export function to(item: notebooks.IOutputItemDto): types.NotebookCellOutputItem {
-
-		let value: Uint8Array | unknown;
-		if (item.value instanceof VSBuffer) {
-			value = item.value.buffer;
-		} else {
-			value = item.value;
-		}
-
-		return new types.NotebookCellOutputItem(item.mime, value, item.metadata);
+		return new types.NotebookCellOutputItem(new Uint8Array(item.valueBytes), item.mime);
 	}
 }
 
 export namespace NotebookCellOutput {
-	export function from(output: types.NotebookCellOutput): notebooks.IOutputDto {
+	export function from(output: vscode.NotebookCellOutput): notebooks.IOutputDto {
 		return {
 			outputId: output.id,
-			outputs: output.outputs.map(NotebookCellOutputItem.from),
+			outputs: output.items.map(NotebookCellOutputItem.from),
 			metadata: output.metadata
 		};
 	}
@@ -1686,18 +1642,15 @@ export namespace NotebookDocumentContentOptions {
 	}
 }
 
-export namespace NotebookKernelPreload {
-	export function from(preload: vscode.NotebookKernelPreload): { uri: UriComponents; provides: string[] } {
+export namespace NotebookRendererScript {
+	export function from(preload: vscode.NotebookRendererScript): { uri: UriComponents; provides: string[] } {
 		return {
 			uri: preload.uri,
-			// todo@connor4312: the conditional here can be removed after a migration period
-			provides: typeof preload.provides === 'string'
-				? [preload.provides]
-				: preload.provides ?? []
+			provides: preload.provides
 		};
 	}
-	export function to(preload: { uri: UriComponents; provides: string[] }): vscode.NotebookKernelPreload {
-		return new types.NotebookKernelPreload(URI.revive(preload.uri), preload.provides);
+	export function to(preload: { uri: UriComponents; provides: string[] }): vscode.NotebookRendererScript {
+		return new types.NotebookRendererScript(URI.revive(preload.uri), preload.provides);
 	}
 }
 

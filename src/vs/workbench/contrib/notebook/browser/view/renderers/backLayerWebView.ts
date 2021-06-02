@@ -29,7 +29,7 @@ import { CellEditState, ICellOutputViewModel, ICommonCellInfo, ICommonNotebookEd
 import { PreloadOptions, preloadsScriptStr, RendererMetadata } from 'vs/workbench/contrib/notebook/browser/view/renderers/webviewPreloads';
 import { transformWebviewThemeVars } from 'vs/workbench/contrib/notebook/browser/view/renderers/webviewThemeMapping';
 import { MarkdownCellViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/markdownCellViewModel';
-import { INotebookKernel, INotebookRendererInfo } from 'vs/workbench/contrib/notebook/common/notebookCommon';
+import { INotebookKernel, INotebookRendererInfo, RendererMessagingSpec } from 'vs/workbench/contrib/notebook/common/notebookCommon';
 import { IScopedRendererMessaging } from 'vs/workbench/contrib/notebook/common/notebookRendererMessagingService';
 import { INotebookService } from 'vs/workbench/contrib/notebook/common/notebookService';
 import { IWebviewService, WebviewContentPurpose, WebviewElement } from 'vs/workbench/contrib/webview/browser/webview';
@@ -192,7 +192,7 @@ export interface ICreationRequestMessage {
 	type: 'html';
 	content:
 	| { type: RenderOutputType.Html; htmlContent: string }
-	| { type: RenderOutputType.Extension; outputId: string; value: unknown; valueBytes: Uint8Array, metadata: unknown; mimeType: string };
+	| { type: RenderOutputType.Extension; outputId: string; valueBytes: Uint8Array, metadata: unknown; metadata2: unknown, mimeType: string };
 	cellId: string;
 	outputId: string;
 	cellTop: number;
@@ -660,7 +660,7 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 						}
 
 						dragging {
-							background-color: var(--vscode-editor-background);
+							background-color: var(--theme-background);
 						}
 					</style>
 				</template>
@@ -682,7 +682,7 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 						padding-bottom: var(--notebook-output-node-padding);
 						padding-left: var(--notebook-output-node-left-padding);
 						box-sizing: border-box;
-						background-color: var(--vscode-notebook-outputContainerBackgroundColor);
+						background-color: var(--theme-notebook-output-background);
 					}
 
 					/* markdown */
@@ -697,7 +697,7 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 						white-space: nowrap;
 						overflow: hidden;
 						white-space: initial;
-						color: var(--vscode-foreground);
+						color: var(--theme-ui-foreground);
 					}
 
 					#container > div.preview.draggable {
@@ -714,11 +714,11 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 					}
 
 					#container > div.preview.selected {
-						background: var(--vscode-notebook-selectedCellBackground);
+						background: var(--theme-notebook-cell-selected-background);
 					}
 
 					#container > div.preview.dragging {
-						background-color: var(--vscode-editor-background);
+						background-color: var(--theme-background);
 					}
 
 					.monaco-workbench.vs-dark .notebookOverlay .cell.markdown .latex img,
@@ -727,15 +727,15 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 					}
 
 					#container > div.nb-symbolHighlight {
-						background-color: var(--vscode-notebook-symbolHighlightBackground);
+						background-color: var(--theme-notebook-symbol-highlight-background);
 					}
 
 					#container > div.nb-cellDeleted {
-						background-color: var(--vscode-diffEditor-removedTextBackground);
+						background-color: var(--theme-notebook-diff-removed-background);
 					}
 
 					#container > div.nb-cellAdded {
-						background-color: var(--vscode-diffEditor-insertedTextBackground);
+						background-color: var(--theme-notebook-diff-inserted-background);
 					}
 
 					#container > div > div:not(.preview) > div {
@@ -801,7 +801,7 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 				entrypoint,
 				mimeTypes: renderer.mimeTypes,
 				extends: renderer.extends,
-				messaging: !!renderer.messaging,
+				messaging: renderer.messaging !== RendererMessagingSpec.Never,
 			};
 		});
 	}
@@ -833,6 +833,16 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 	}
 
 	async createWebview(): Promise<void> {
+		const baseUrl = this.asWebviewUri(dirname(this.documentUri), undefined);
+
+		// Python hasn't moved to use a preload to load require support yet.
+		// For all other notebooks, we no longer want to include our loader.
+		if (!this.documentUri.path.toLowerCase().endsWith('.ipynb')) {
+			const htmlContent = this.generateContent('', baseUrl.toString());
+			this._initialize(htmlContent);
+			return;
+		}
+
 		let coreDependencies = '';
 		let resolveFunc: () => void;
 
@@ -840,7 +850,6 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 			resolveFunc = resolve;
 		});
 
-		const baseUrl = this.asWebviewUri(dirname(this.documentUri), undefined);
 
 		if (!isWeb) {
 			const loaderUri = FileAccess.asFileUri('vs/loader.js', require);
@@ -889,7 +898,7 @@ var requirejs = (function() {
 		await this._initalized;
 	}
 
-	private async _initialize(content: string) {
+	private _initialize(content: string) {
 		if (!document.body.contains(this.element)) {
 			throw new Error('Element is already detached from the DOM tree');
 		}
@@ -1513,9 +1522,9 @@ var requirejs = (function() {
 					type: RenderOutputType.Extension,
 					outputId: output.outputId,
 					mimeType: content.mimeType,
-					value: outputDto?.value,
 					valueBytes: new Uint8Array(outputDto?.valueBytes ?? []),
-					metadata: outputDto?.metadata,
+					metadata: output.metadata,
+					metadata2: output.metadata
 				},
 			};
 		} else {

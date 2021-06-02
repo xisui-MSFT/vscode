@@ -43,16 +43,17 @@ import { IThemeService, ThemeIcon } from 'vs/platform/theme/common/themeService'
 import { IWorkspaceTrustManagementService } from 'vs/platform/workspace/common/workspaceTrust';
 import { isSingleFolderWorkspaceIdentifier, toWorkspaceIdentifier } from 'vs/platform/workspaces/common/workspaces';
 import { EditorPane } from 'vs/workbench/browser/parts/editor/editorPane';
-import { EditorOptions, IEditorOpenContext } from 'vs/workbench/common/editor';
+import { IEditorOpenContext } from 'vs/workbench/common/editor';
 import { ChoiceAction } from 'vs/workbench/common/notifications';
 import { debugIconStartForeground } from 'vs/workbench/contrib/debug/browser/debugColors';
-import { IExtensionsWorkbenchService } from 'vs/workbench/contrib/extensions/common/extensions';
+import { IExtensionsWorkbenchService, LIST_WORKSPACE_UNSUPPORTED_EXTENSIONS_COMMAND_ID } from 'vs/workbench/contrib/extensions/common/extensions';
 import { getInstalledExtensions, IExtensionStatus } from 'vs/workbench/contrib/extensions/common/extensionsUtils';
 import { settingsEditIcon, settingsRemoveIcon } from 'vs/workbench/contrib/preferences/browser/preferencesIcons';
 import { IWorkbenchConfigurationService } from 'vs/workbench/services/configuration/common/configuration';
 import { IExtensionManifestPropertiesService } from 'vs/workbench/services/extensions/common/extensionManifestPropertiesService';
 import { IUriIdentityService } from 'vs/workbench/services/uriIdentity/common/uriIdentity';
 import { WorkspaceTrustEditorInput } from 'vs/workbench/services/workspaces/browser/workspaceTrustEditorInput';
+import { IEditorOptions } from 'vs/platform/editor/common/editor';
 
 export const shieldIcon = registerCodicon('workspace-trust-icon', Codicon.shield);
 
@@ -132,6 +133,7 @@ class WorkspaceTrustedUrisTable extends Disposable {
 			],
 			{
 				horizontalScrolling: false,
+				alwaysConsumeMouseWheel: false,
 				openOnSingleClick: false,
 			}
 		) as WorkbenchTable<ITrustedUriItem>;
@@ -186,7 +188,7 @@ class WorkspaceTrustedUrisTable extends Disposable {
 			currentWorkspaceUris.push(currentWorkspace.configuration);
 		}
 
-		const entries = this.workspaceTrustManagementService.getTrustedFolders().map(uri => {
+		const entries = this.workspaceTrustManagementService.getTrustedUris().map(uri => {
 
 			let relatedToCurrentWorkspace = false;
 			for (const workspaceUri of currentWorkspaceUris) {
@@ -213,7 +215,7 @@ class WorkspaceTrustedUrisTable extends Disposable {
 	}
 
 	acceptEdit(item: ITrustedUriItem, uri: URI) {
-		const trustedFolders = this.workspaceTrustManagementService.getTrustedFolders();
+		const trustedFolders = this.workspaceTrustManagementService.getTrustedUris();
 		const index = this.getIndexOfTrustedUriEntry(item);
 
 		if (index >= trustedFolders.length) {
@@ -222,7 +224,7 @@ class WorkspaceTrustedUrisTable extends Disposable {
 			trustedFolders[index] = uri;
 		}
 
-		this.workspaceTrustManagementService.setTrustedFolders(trustedFolders);
+		this.workspaceTrustManagementService.setTrustedUris(trustedFolders);
 		this._onDidAcceptEdit.fire(item);
 	}
 
@@ -554,6 +556,7 @@ export class WorkspaceTrustEditor extends EditorPane {
 
 	protected createEditor(parent: HTMLElement): void {
 		this.rootElement = append(parent, $('.workspace-trust-editor', { tabindex: '0' }));
+		this.rootElement.style.display = 'none';
 
 		this.createHeaderElement(this.rootElement);
 
@@ -580,11 +583,12 @@ export class WorkspaceTrustEditor extends EditorPane {
 		this.rootElement.focus();
 	}
 
-	override async setInput(input: WorkspaceTrustEditorInput, options: EditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
+	override async setInput(input: WorkspaceTrustEditorInput, options: IEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
 
 		await super.setInput(input, options, context, token);
 		if (token.isCancellationRequested) { return; }
 
+		await this.workspaceTrustManagementService.workspaceTrustInitialized;
 		this.registerListeners();
 		this.render();
 	}
@@ -736,6 +740,7 @@ export class WorkspaceTrustEditor extends EditorPane {
 
 		this.bodyScrollBar.getDomNode().style.height = `calc(100% - ${this.headerContainer.clientHeight}px)`;
 		this.bodyScrollBar.scanDomNode();
+		this.rootElement.style.display = '';
 		this.rendering = false;
 	}
 
@@ -777,7 +782,7 @@ export class WorkspaceTrustEditor extends EditorPane {
 		this.affectedFeaturesContainer = append(parent, $('.workspace-trust-features'));
 	}
 
-	private renderAffectedFeatures(numSettings: number, numExtensions: number): void {
+	private async renderAffectedFeatures(numSettings: number, numExtensions: number): Promise<void> {
 		clearNode(this.affectedFeaturesContainer);
 		const trustedContainer = append(this.affectedFeaturesContainer, $('.workspace-trust-limitations.trusted'));
 		const [trustedTitle, trustedSubTitle] = this.getFeaturesHeaderText(true);
@@ -797,7 +802,7 @@ export class WorkspaceTrustEditor extends EditorPane {
 			localize('untrustedTasks', "Tasks are disabled"),
 			localize('untrustedDebugging', "Debugging is disabled"),
 			numSettings ? localize('untrustedSettings', "[{0} workspace settings](command:{1}) are not applied", numSettings, 'settings.filterUntrusted') : localize('no untrustedSettings', "Workspace settings requiring trust are not applied"),
-			localize('untrustedExtensions', "[{0} extensions](command:{1}) are disabled or have limited functionality", numExtensions, 'workbench.extensions.action.listWorkspaceUnsupportedExtensions')
+			localize('untrustedExtensions', "[{0} extensions](command:{1}) are disabled or have limited functionality", numExtensions, LIST_WORKSPACE_UNSUPPORTED_EXTENSIONS_COMMAND_ID)
 		], xListIcon.classNamesArray);
 
 		if (this.workspaceTrustManagementService.isWorkpaceTrusted()) {

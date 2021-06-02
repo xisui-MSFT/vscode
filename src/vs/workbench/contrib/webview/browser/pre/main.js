@@ -25,6 +25,7 @@ const isSafari = navigator.vendor && navigator.vendor.indexOf('Apple') > -1 &&
 
 const searchParams = new URL(location.toString()).searchParams;
 const ID = searchParams.get('id');
+const expectedWorkerVersion = parseInt(searchParams.get('swVersion'));
 
 /**
  * Use polling to track focus of main webview and iframes within the webview
@@ -81,10 +82,10 @@ defaultStyles.textContent = `
 
 	body {
 		background-color: transparent;
-		color: var(--vscode-editor-foreground);
-		font-family: var(--vscode-font-family);
-		font-weight: var(--vscode-font-weight);
-		font-size: var(--vscode-font-size);
+		color: var(--vscode-editor-foreground, var(--theme-foreground));
+		font-family: var(--vscode-font-family, var(--theme-font-family));
+		font-weight: var(--vscode-font-weight, var(--theme-font-weight));
+		font-size: var(--vscode-font-size, var(--theme-font-size));
 		margin: 0;
 		padding: 0 20px;
 	}
@@ -95,11 +96,11 @@ defaultStyles.textContent = `
 	}
 
 	a {
-		color: var(--vscode-textLink-foreground);
+		color: var(--vscode-textLink-foreground, var(--theme-link));
 	}
 
 	a:hover {
-		color: var(--vscode-textLink-activeForeground);
+		color: var(--vscode-textLink-activeForeground, var(--theme-link-active));
 	}
 
 	a:focus,
@@ -111,16 +112,16 @@ defaultStyles.textContent = `
 	}
 
 	code {
-		color: var(--vscode-textPreformat-foreground);
+		color: var(--vscode-textPreformat-foreground, var(--theme-code-foreground));
 	}
 
 	blockquote {
-		background: var(--vscode-textBlockQuote-background);
-		border-color: var(--vscode-textBlockQuote-border);
+		background: var(--vscode-textBlockQuote-background, var(--theme-quote-background));
+		border-color: var(--vscode-textBlockQuote-border, var(--theme-quote-border));
 	}
 
 	kbd {
-		color: var(--vscode-editor-foreground);
+		color: var(--vscode-editor-foreground, var(--theme-foreground));
 		border-radius: 3px;
 		vertical-align: middle;
 		padding: 1px 3px;
@@ -143,17 +144,17 @@ defaultStyles.textContent = `
 	}
 
 	::-webkit-scrollbar-corner {
-		background-color: var(--vscode-editor-background);
+		background-color: var(--vscode-editor-background, var(--theme-background));
 	}
 
 	::-webkit-scrollbar-thumb {
-		background-color: var(--vscode-scrollbarSlider-background);
+		background-color: var(--vscode-scrollbarSlider-background, var(--theme-scrollbar-background));
 	}
 	::-webkit-scrollbar-thumb:hover {
-		background-color: var(--vscode-scrollbarSlider-hoverBackground);
+		background-color: var(--vscode-scrollbarSlider-hoverBackground, var(--theme-scrollbar-hover-background));
 	}
 	::-webkit-scrollbar-thumb:active {
-		background-color: var(--vscode-scrollbarSlider-activeBackground);
+		background-color: var(--vscode-scrollbarSlider-activeBackground, var(--theme-scrollbar-active-background));
 	}`;
 
 /**
@@ -210,16 +211,16 @@ const workerReady = new Promise(async (resolve, reject) => {
 		return reject(new Error('Service Workers are not enabled in browser. Webviews will not work.'));
 	}
 
-	const expectedWorkerVersion = 1;
+	const swPath = `service-worker.js${self.location.search}`;
 
-	navigator.serviceWorker.register(`service-worker.js${self.location.search}`).then(
+	navigator.serviceWorker.register(swPath).then(
 		async registration => {
 			await navigator.serviceWorker.ready;
 
 			/**
 			 * @param {MessageEvent} event
 			 */
-			const versionHandler = (event) => {
+			const versionHandler = async (event) => {
 				if (event.data.channel !== 'version') {
 					return;
 				}
@@ -228,10 +229,16 @@ const workerReady = new Promise(async (resolve, reject) => {
 				if (event.data.version === expectedWorkerVersion) {
 					return resolve();
 				} else {
-					// If we have the wrong version, try once to unregister and re-register
-					return registration.update()
+					console.log(`Found unexpected service worker version. Found: ${event.data.version}. Expected: ${expectedWorkerVersion}`);
+					console.log(`Attempting to reload service worker`);
+
+					// If we have the wrong version, try once (and only once) to unregister and re-register
+					// Note that `.update` doesn't seem to work desktop electron at the moment so we use
+					// `unregister` and `register` here.
+					return registration.unregister()
+						.then(() => navigator.serviceWorker.register(swPath))
 						.then(() => navigator.serviceWorker.ready)
-						.finally(resolve);
+						.finally(() => { resolve(); });
 				}
 			};
 			navigator.serviceWorker.addEventListener('message', versionHandler);

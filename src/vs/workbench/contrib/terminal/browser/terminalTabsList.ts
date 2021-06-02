@@ -16,7 +16,7 @@ import { IInstantiationService } from 'vs/platform/instantiation/common/instanti
 import { ActionBar } from 'vs/base/browser/ui/actionbar/actionbar';
 import { MenuItemAction } from 'vs/platform/actions/common/actions';
 import { MenuEntryActionViewItem } from 'vs/platform/actions/browser/menuEntryActionViewItem';
-import { KEYBINDING_CONTEXT_TERMINAL_TABS_SINGULAR_SELECTION, TerminalCommandId } from 'vs/workbench/contrib/terminal/common/terminal';
+import { IS_SPLIT_TERMINAL_CONTEXT_KEY, KEYBINDING_CONTEXT_TERMINAL_TABS_SINGULAR_SELECTION, TerminalCommandId } from 'vs/workbench/contrib/terminal/common/terminal';
 import { TerminalSettingId } from 'vs/platform/terminal/common/terminal';
 import { Codicon } from 'vs/base/common/codicons';
 import { Action } from 'vs/base/common/actions';
@@ -26,7 +26,7 @@ import { DEFAULT_LABELS_CONTAINER, IResourceLabel, ResourceLabels } from 'vs/wor
 import { IDecorationsService } from 'vs/workbench/services/decorations/browser/decorations';
 import { IHoverAction, IHoverService } from 'vs/workbench/services/hover/browser/hover';
 import Severity from 'vs/base/common/severity';
-import { Disposable, DisposableStore, IDisposable } from 'vs/base/common/lifecycle';
+import { Disposable, DisposableStore, dispose, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
 import { IListDragAndDrop, IListDragOverReaction, IListRenderer, ListDragOverEffect } from 'vs/base/browser/ui/list/list';
 import { DataTransfers, IDragAndDropData } from 'vs/base/browser/dnd';
 import { disposableTimeout } from 'vs/base/common/async';
@@ -34,6 +34,13 @@ import { ElementsDragAndDropData } from 'vs/base/browser/ui/list/listView';
 import { URI } from 'vs/base/common/uri';
 import { getColorClass, getIconId, getUriClasses } from 'vs/workbench/contrib/terminal/browser/terminalIcon';
 import { Schemas } from 'vs/base/common/network';
+import { IEditableData } from 'vs/workbench/common/views';
+import { IContextViewService } from 'vs/platform/contextview/browser/contextView';
+import { InputBox, MessageType } from 'vs/base/browser/ui/inputbox/inputBox';
+import { once } from 'vs/base/common/functional';
+import { attachInputBoxStyler } from 'vs/platform/theme/common/styler';
+import { IKeyboardEvent } from 'vs/base/browser/keyboardEvent';
+import { KeyCode } from 'vs/base/common/keyCodes';
 
 const $ = DOM.$;
 
@@ -50,6 +57,7 @@ export const enum TerminalTabsListSizes {
 export class TerminalTabList extends WorkbenchList<ITerminalInstance> {
 	private _decorationsProvider: TerminalDecorationsProvider | undefined;
 	private _terminalTabsSingleSelectedContextKey: IContextKey<boolean>;
+	private _isSplitContextKey: IContextKey<boolean>;
 
 	constructor(
 		container: HTMLElement,
@@ -89,13 +97,13 @@ export class TerminalTabList extends WorkbenchList<ITerminalInstance> {
 			configurationService,
 			keybindingService,
 		);
-		this._terminalService.onInstancesChanged(() => this.render());
-		this._terminalService.onGroupsChanged(() => this.render());
-		this._terminalService.onInstanceTitleChanged(() => this.render());
-		this._terminalService.onInstanceIconChanged(() => this.render());
-		this._terminalService.onInstancePrimaryStatusChanged(() => this.render());
-		this._terminalService.onDidChangeConnectionState(() => this.render());
-		this._themeService.onDidColorThemeChange(() => this.render());
+		this._terminalService.onInstancesChanged(() => this.refresh());
+		this._terminalService.onGroupsChanged(() => this.refresh());
+		this._terminalService.onInstanceTitleChanged(() => this.refresh());
+		this._terminalService.onInstanceIconChanged(() => this.refresh());
+		this._terminalService.onInstancePrimaryStatusChanged(() => this.refresh());
+		this._terminalService.onDidChangeConnectionState(() => this.refresh());
+		this._themeService.onDidColorThemeChange(() => this.refresh());
 		this._terminalService.onActiveInstanceChanged(e => {
 			if (e) {
 				const i = this._terminalService.terminalInstances.indexOf(e);
@@ -139,6 +147,7 @@ export class TerminalTabList extends WorkbenchList<ITerminalInstance> {
 		});
 
 		this._terminalTabsSingleSelectedContextKey = KEYBINDING_CONTEXT_TERMINAL_TABS_SINGULAR_SELECTION.bindTo(contextKeyService);
+		this._isSplitContextKey = IS_SPLIT_TERMINAL_CONTEXT_KEY.bindTo(contextKeyService);
 
 		this.onDidChangeSelection(e => this._updateContextKey());
 		this.onDidChangeFocus(() => this._updateContextKey());
@@ -146,6 +155,9 @@ export class TerminalTabList extends WorkbenchList<ITerminalInstance> {
 		this.onDidOpen(async e => {
 			const instance = e.element;
 			if (!instance) {
+				return;
+			}
+			if (e.editorOptions.pinned) {
 				return;
 			}
 			this._terminalService.setActiveInstance(instance);
@@ -157,15 +169,17 @@ export class TerminalTabList extends WorkbenchList<ITerminalInstance> {
 			this._decorationsProvider = instantiationService.createInstance(TerminalDecorationsProvider);
 			_decorationsService.registerDecorationsProvider(this._decorationsProvider);
 		}
-		this.render();
+		this.refresh();
 	}
 
-	render(): void {
+	refresh(): void {
 		this.splice(0, this.length, this._terminalService.terminalInstances);
 	}
 
 	private _updateContextKey() {
 		this._terminalTabsSingleSelectedContextKey.set(this.getSelectedElements().length === 1);
+		const instance = this.getFocusedElements();
+		this._isSplitContextKey.set(instance.length > 0 && this._terminalService.instanceIsSplit(instance[0]));
 	}
 }
 
@@ -182,7 +196,8 @@ class TerminalTabsRenderer implements IListRenderer<ITerminalInstance, ITerminal
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IKeybindingService private readonly _keybindingService: IKeybindingService,
 		@IListService private readonly _listService: IListService,
-		@IThemeService private readonly _themeService: IThemeService
+		@IThemeService private readonly _themeService: IThemeService,
+		@IContextViewService private readonly _contextViewService: IContextViewService
 	) {
 	}
 
@@ -231,12 +246,13 @@ class TerminalTabsRenderer implements IListRenderer<ITerminalInstance, ITerminal
 	}
 
 	renderElement(instance: ITerminalInstance, index: number, template: ITerminalTabEntryTemplate): void {
+		const hasText = !this.shouldHideText();
+
 		const group = this._terminalService.getGroupForInstance(instance);
 		if (!group) {
 			throw new Error(`Could not find group for instance "${instance.instanceId}"`);
 		}
 
-		const hasText = !this.shouldHideText();
 		template.element.classList.toggle('has-text', hasText);
 
 		let prefix: string = '';
@@ -273,11 +289,11 @@ class TerminalTabsRenderer implements IListRenderer<ITerminalInstance, ITerminal
 			}
 		} else {
 			this.fillActionBar(instance, template);
-			label = `${prefix}$(${iconId})`;
+			label = prefix;
 			// Only add the title if the icon is set, this prevents the title jumping around for
 			// example when launching with a ShellLaunchConfig.name and no icon
 			if (instance.icon) {
-				label += ` ${instance.title}`;
+				label += `$(${iconId}) ${instance.title}`;
 			}
 		}
 
@@ -291,6 +307,7 @@ class TerminalTabsRenderer implements IListRenderer<ITerminalInstance, ITerminal
 
 		// Kill terminal on middle click
 		template.elementDispoables.add(DOM.addDisposableListener(template.element, DOM.EventType.AUXCLICK, e => {
+			e.stopImmediatePropagation();
 			if (e.button === 1/*middle*/) {
 				instance.dispose();
 			}
@@ -320,6 +337,91 @@ class TerminalTabsRenderer implements IListRenderer<ITerminalInstance, ITerminal
 				markdownNotSupportedFallback: undefined
 			},
 			extraClasses
+		});
+		const editableData = this._terminalService.getEditableData(instance);
+		template.label.element.classList.toggle('editable-tab', !!editableData);
+		if (editableData) {
+			this._renderInputBox(template.label.element.querySelector('.monaco-icon-label-container')!, instance, editableData);
+			template.actionBar.clear();
+		}
+	}
+
+	private _renderInputBox(container: HTMLElement, instance: ITerminalInstance, editableData: IEditableData): IDisposable {
+
+		const label = this._labels.create(container);
+		const value = instance.title || '';
+
+		const inputBox = new InputBox(container, this._contextViewService, {
+			validationOptions: {
+				validation: (value) => {
+					const message = editableData.validationMessage(value);
+					if (!message || message.severity !== Severity.Error) {
+						return null;
+					}
+
+					return {
+						content: message.content,
+						formatContent: true,
+						type: MessageType.ERROR
+					};
+				}
+			},
+			ariaLabel: localize('terminalInputAriaLabel', "Type terminal name. Press Enter to confirm or Escape to cancel.")
+		});
+		const styler = attachInputBoxStyler(inputBox, this._themeService);
+		inputBox.element.style.height = '22px';
+		inputBox.value = value;
+		inputBox.focus();
+		inputBox.select({ start: 0, end: value.length });
+
+		const done = once((success: boolean, finishEditing: boolean) => {
+			inputBox.element.style.display = 'none';
+			const value = inputBox.value;
+			dispose(toDispose);
+			inputBox.element.remove();
+			if (finishEditing) {
+				editableData.onFinish(value, success);
+			}
+		});
+
+		const showInputBoxNotification = () => {
+			if (inputBox.isInputValid()) {
+				const message = editableData.validationMessage(inputBox.value);
+				if (message) {
+					inputBox.showMessage({
+						content: message.content,
+						formatContent: true,
+						type: message.severity === Severity.Info ? MessageType.INFO : message.severity === Severity.Warning ? MessageType.WARNING : MessageType.ERROR
+					});
+				} else {
+					inputBox.hideMessage();
+				}
+			}
+		};
+		showInputBoxNotification();
+
+		const toDispose = [
+			inputBox,
+			DOM.addStandardDisposableListener(inputBox.inputElement, DOM.EventType.KEY_DOWN, (e: IKeyboardEvent) => {
+				e.stopPropagation();
+				if (e.equals(KeyCode.Enter)) {
+					done(inputBox.isInputValid(), true);
+				} else if (e.equals(KeyCode.Escape)) {
+					done(false, true);
+				}
+			}),
+			DOM.addStandardDisposableListener(inputBox.inputElement, DOM.EventType.KEY_UP, (e: IKeyboardEvent) => {
+				showInputBoxNotification();
+			}),
+			DOM.addDisposableListener(inputBox.inputElement, DOM.EventType.BLUR, () => {
+				done(inputBox.isInputValid(), true);
+			}),
+			label,
+			styler
+		];
+
+		return toDisposable(() => {
+			done(false, false);
 		});
 	}
 
@@ -423,6 +525,10 @@ class TerminalTabsDragAndDrop implements IListDragAndDrop<ITerminalInstance> {
 			scheme: Schemas.vscodeTerminal,
 			path: instance.instanceId.toString()
 		}).toString();
+	}
+
+	getDragLabel?(elements: ITerminalInstance[], originalEvent: DragEvent): string | undefined {
+		return elements.length === 1 ? elements[0].title : undefined;
 	}
 
 	onDragStart(data: IDragAndDropData, originalEvent: DragEvent): void {

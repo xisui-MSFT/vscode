@@ -110,12 +110,16 @@ class XLF {
     }
     toString() {
         this.appendHeader();
-        for (let file in this.files) {
+        const files = Object.keys(this.files).sort();
+        for (const file of files) {
             this.appendNewLine(`<file original="${file}" source-language="en" datatype="plaintext"><body>`, 2);
-            for (let item of this.files[file]) {
+            const items = this.files[file].sort((a, b) => {
+                return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+            });
+            for (const item of items) {
                 this.addStringItem(file, item);
             }
-            this.appendNewLine('</body></file>', 2);
+            this.appendNewLine('</body></file>');
         }
         this.appendFooter();
         return this.buffer.join('\r\n');
@@ -645,13 +649,12 @@ exports.createXlfFilesForExtensions = createXlfFilesForExtensions;
 function createXlfFilesForIsl() {
     return event_stream_1.through(function (file) {
         let projectName, resourceFile;
-        if (path.basename(file.path) === 'Default.isl') {
+        if (path.basename(file.path) === 'messages.en.isl') {
             projectName = setupProject;
-            resourceFile = 'setup_default.xlf';
+            resourceFile = 'messages.xlf';
         }
         else {
-            projectName = workbenchProject;
-            resourceFile = 'setup_messages.xlf';
+            throw new Error(`Unknown input file ${file.path}`);
         }
         let xlf = new XLF(projectName), keys = [], messages = [];
         let model = new TextModel(file.contents.toString());
@@ -1110,9 +1113,6 @@ function prepareIslFiles(language, innoSetupConfig) {
         parsePromises.push(parsePromise);
         parsePromise.then(resolvedFiles => {
             resolvedFiles.forEach(file => {
-                if (path.basename(file.originalFilePath) === 'Default' && !innoSetupConfig.defaultInfo) {
-                    return;
-                }
                 let translatedFile = createIslFile(file.originalFilePath, file.messages, language, innoSetupConfig);
                 stream.queue(translatedFile);
             });
@@ -1148,20 +1148,9 @@ function createIslFile(originalFilePath, messages, language, innoSetup) {
                 let key = sections[0];
                 let translated = line;
                 if (key) {
-                    if (key === 'LanguageName') {
-                        translated = `${key}=${innoSetup.defaultInfo.name}`;
-                    }
-                    else if (key === 'LanguageID') {
-                        translated = `${key}=${innoSetup.defaultInfo.id}`;
-                    }
-                    else if (key === 'LanguageCodePage') {
-                        translated = `${key}=${innoSetup.codePage.substr(2)}`;
-                    }
-                    else {
-                        let translatedMessage = messages[key];
-                        if (translatedMessage) {
-                            translated = `${key}=${translatedMessage}`;
-                        }
+                    let translatedMessage = messages[key];
+                    if (translatedMessage) {
+                        translated = `${key}=${translatedMessage}`;
                     }
                 }
                 content.push(translated);
