@@ -960,6 +960,8 @@ export interface IDebugService {
 	 */
 	sourceIsNotAvailable(uri: uri): void;
 
+	getDisassemble(memoryReference: string, offset: number, instructionOffset: number, instructionCount: number): Promise<any>;
+
 	/**
 	 * Gets the current debug model.
 	 */
@@ -969,6 +971,7 @@ export interface IDebugService {
 	 * Gets the current view model.
 	 */
 	getViewModel(): IViewModel;
+
 }
 
 // Editor interfaces
